@@ -188,7 +188,12 @@ func (c *Client) heartbeat() {
 		select {
 		case <-c.activityTimerReset:
 			if !c.activityTimer.Stop() {
-				<-c.activityTimer.C
+				{
+					select {
+					case <-c.activityTimer.C:
+					default:
+					}
+				}
 			}
 			c.activityTimer.Reset(c.activityTimeout)
 
