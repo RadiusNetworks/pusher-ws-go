@@ -1,4 +1,4 @@
-module github.com/goguardian/pusher-ws-go
+module github.com/RadiusNetworks/pusher-ws-go
 
 go 1.17
 
