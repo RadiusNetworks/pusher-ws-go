@@ -65,6 +65,10 @@ type Client struct {
 	// by Pusher will be sent to this channel.
 	Errors chan error
 
+	closes        []chan error
+	notifyMutex   sync.RWMutex
+	disconnectErr error
+
 	socketID string
 	// TODO: make this configurable
 	activityTimeout time.Duration
@@ -124,6 +128,16 @@ func (c *Client) generateConnURL(appKey string) string {
 	return fmt.Sprintf(connURLFormat, scheme, host, port, appKey, protocolVersion)
 }
 
+// NotifyClose registers a listener for when the pusher connection is closed.
+// The chan provided will be closed when the connection is closed and on a graceful close, no error will be sent.
+func (c *Client) NotifyClose(ch chan error) chan error {
+	c.notifyMutex.Lock()
+	defer c.notifyMutex.Unlock()
+
+	c.closes = append(c.closes, ch)
+	return ch
+}
+
 // Connect establishes a connection to the Pusher app specified by appKey.
 func (c *Client) Connect(appKey string) error {
 	c.mutex.Lock()
@@ -157,6 +171,7 @@ func (c *Client) Connect(appKey string) error {
 		c.activityTimerReset = make(chan struct{}, 1)
 		c.boundEvents = map[string]boundEventChans{}
 		c.subscribedChannels = subscribedChannels{}
+		c.disconnectErr = nil
 
 		go c.heartbeat()
 		go c.listen()
@@ -379,6 +394,20 @@ func (c *Client) Disconnect() error {
 	defer c.mutex.Unlock()
 
 	c.connected = false
+
+	c.notifyMutex.Lock()
+	defer c.notifyMutex.Unlock()
+
+	// Broadcast disconnect
+	for _, ch := range c.closes {
+		if c.disconnectErr != nil {
+			ch <- fmt.Errorf("pusher connection closed with error: %w", c.disconnectErr)
+		} else {
+			ch <- nil
+		}
+		close(ch)
+	}
+	c.closes = c.closes[:0]
 
 	return c.ws.Close()
 }
