@@ -73,8 +73,12 @@ type Client struct {
 	disconnectErr error
 
 	socketID string
-	// TODO: make this configurable
-	activityTimeout time.Duration
+
+	// Configureable timeout that will override the value
+	// provided by the API on connect if configured
+	ActivityTimeout  time.Duration
+	_activityTimeout time.Duration
+
 	// TODO: implement timeout logic
 	// pongTimeout time.Duration
 
@@ -169,8 +173,12 @@ func (c *Client) Connect(appKey string) error {
 		}
 		c.connected = true
 		c.socketID = connData.SocketID
-		c.activityTimeout = time.Duration(connData.ActivityTimeout) * time.Second
-		c.activityTimer = time.NewTimer(c.activityTimeout)
+		if c.ActivityTimeout > 0 {
+			c._activityTimeout = c.ActivityTimeout
+		} else {
+			c._activityTimeout = time.Duration(connData.ActivityTimeout) * time.Second
+		}
+		c.activityTimer = time.NewTimer(c._activityTimeout)
 		c.activityTimerReset = make(chan struct{}, 1)
 		c.boundEvents = map[string]boundEventChans{}
 		c.subscribedChannels = subscribedChannels{}
@@ -213,7 +221,7 @@ func (c *Client) heartbeat() {
 					}
 				}
 			}
-			c.activityTimer.Reset(c.activityTimeout)
+			c.activityTimer.Reset(c._activityTimeout)
 
 		case <-c.activityTimer.C:
 			websocket.Message.Send(c.ws, pingPayload)
@@ -231,7 +239,7 @@ func (c *Client) sendError(err error) {
 
 func (c *Client) listen() {
 	for c.isConnected() {
-		c.ws.SetReadDeadline(time.Now().Add(c.activityTimeout + pongTimeout))
+		c.ws.SetReadDeadline(time.Now().Add(c._activityTimeout + pongTimeout))
 
 		var event Event
 		err := websocket.JSON.Receive(c.ws, &event)
