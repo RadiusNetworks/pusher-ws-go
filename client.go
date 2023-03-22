@@ -16,6 +16,9 @@ const (
 	pingPayload = `{"event":"pusher:ping","data":"{}"}`
 	pongPayload = `{"event":"pusher:pong","data":"{}"}`
 
+	// api recommended value for pong timeout
+	pongTimeout = 30 * time.Second
+
 	pusherPing                  = "pusher:ping"
 	pusherPong                  = "pusher:pong"
 	pusherError                 = "pusher:error"
@@ -228,6 +231,8 @@ func (c *Client) sendError(err error) {
 
 func (c *Client) listen() {
 	for c.isConnected() {
+		c.ws.SetReadDeadline(time.Now().Add(c.activityTimeout + pongTimeout))
+
 		var event Event
 		err := websocket.JSON.Receive(c.ws, &event)
 		if err != nil {
@@ -237,7 +242,9 @@ func (c *Client) listen() {
 				return
 			}
 			c.sendError(err)
-			continue
+			c.disconnectErr = err
+			c.Disconnect()
+			break
 		}
 
 		c.resetActivityTimer()
@@ -409,5 +416,8 @@ func (c *Client) Disconnect() error {
 	}
 	c.closes = c.closes[:0]
 
-	return c.ws.Close()
+	if c.ws != nil {
+		return c.ws.Close()
+	}
+	return nil
 }
