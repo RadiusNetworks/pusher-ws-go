@@ -96,6 +96,8 @@ type Client struct {
 	// used for testing
 	overrideHost string
 	overridePort int
+
+	stopHeartbeat chan bool
 }
 
 type connectionData struct {
@@ -183,7 +185,7 @@ func (c *Client) Connect(appKey string) error {
 		c.boundEvents = map[string]boundEventChans{}
 		c.subscribedChannels = subscribedChannels{}
 		c.disconnectErr = nil
-
+		c.stopHeartbeat = make(chan bool)
 		go c.heartbeat()
 		go c.listen()
 
@@ -210,7 +212,7 @@ func (c *Client) resetActivityTimer() {
 }
 
 func (c *Client) heartbeat() {
-	for c.isConnected() {
+	for {
 		select {
 		case <-c.activityTimerReset:
 			if !c.activityTimer.Stop() {
@@ -224,8 +226,16 @@ func (c *Client) heartbeat() {
 			c.activityTimer.Reset(c._activityTimeout)
 
 		case <-c.activityTimer.C:
-			websocket.Message.Send(c.ws, pingPayload)
-			// TODO: implement timeout/reconnect logic
+			if c.isConnected() && c.ws != nil {
+				err := websocket.Message.Send(c.ws, pingPayload)
+				if err != nil {
+					c.sendError(fmt.Errorf("error sending pusher ping: %w", err))
+				}
+				// TODO: implement timeout/reconnect logic
+			}
+
+		case <-c.stopHeartbeat:
+			return
 		}
 	}
 }
@@ -339,15 +349,15 @@ func (c *Client) SubscribePresence(channelName string, opts ...SubscribeOption) 
 // be received from that channe. Note that a nil error does not mean that the
 // unsubscription was successful, just that the request was sent.
 func (c *Client) Unsubscribe(channelName string) error {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-
+	c.mutex.RLock()
 	ch, ok := c.subscribedChannels[channelName]
+	c.mutex.RUnlock()
 	if !ok {
 		return nil
 	}
-
+	c.mutex.Lock()
 	delete(c.subscribedChannels, channelName)
+	c.mutex.Unlock()
 	return ch.Unsubscribe()
 }
 
@@ -386,6 +396,9 @@ func (c *Client) Unbind(event string, chans ...chan Event) {
 
 // SendEvent sends an event on the Pusher connection.
 func (c *Client) SendEvent(event string, data interface{}, channelName string) error {
+	if !c.isConnected() {
+		return fmt.Errorf("error in pusher SendEvent, client not connected")
+	}
 	dataJSON, err := json.Marshal(data)
 	if err != nil {
 		return err
@@ -409,7 +422,15 @@ func (c *Client) Disconnect() error {
 	defer c.mutex.Unlock()
 
 	c.connected = false
-
+	if !c.activityTimer.Stop() {
+		{
+			select {
+			case <-c.activityTimer.C:
+			default:
+			}
+		}
+	}
+	close(c.stopHeartbeat)
 	c.notifyMutex.Lock()
 	defer c.notifyMutex.Unlock()
 
