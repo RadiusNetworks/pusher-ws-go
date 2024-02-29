@@ -349,15 +349,15 @@ func (c *Client) SubscribePresence(channelName string, opts ...SubscribeOption) 
 // be received from that channe. Note that a nil error does not mean that the
 // unsubscription was successful, just that the request was sent.
 func (c *Client) Unsubscribe(channelName string) error {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-
+	c.mutex.RLock()
 	ch, ok := c.subscribedChannels[channelName]
+	c.mutex.RUnlock()
 	if !ok {
 		return nil
 	}
-
+	c.mutex.Lock()
 	delete(c.subscribedChannels, channelName)
+	c.mutex.Unlock()
 	return ch.Unsubscribe()
 }
 
