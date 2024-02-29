@@ -396,6 +396,9 @@ func (c *Client) Unbind(event string, chans ...chan Event) {
 
 // SendEvent sends an event on the Pusher connection.
 func (c *Client) SendEvent(event string, data interface{}, channelName string) error {
+	if !c.isConnected() {
+		return fmt.Errorf("error in pusher SendEvent, client not connected")
+	}
 	dataJSON, err := json.Marshal(data)
 	if err != nil {
 		return err
