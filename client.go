@@ -422,6 +422,14 @@ func (c *Client) Disconnect() error {
 	defer c.mutex.Unlock()
 
 	c.connected = false
+	if !c.activityTimer.Stop() {
+		{
+			select {
+			case <-c.activityTimer.C:
+			default:
+			}
+		}
+	}
 	close(c.stopHeartbeat)
 	c.notifyMutex.Lock()
 	defer c.notifyMutex.Unlock()
